@@ -15,7 +15,7 @@
 3. `internal/buildinfo` 的版本、提交、构建时间和 Go runtime 元数据；
 4. `pkg/types` 中严格的 v1 `n=3f+1`、`q=2f+1`、`k=f+1` 参数推导；
 5. `pkg/observability` 中基于 zerolog 1.35.1 的同步结构化日志基础，提供严格 level/format 校验、JSON 与无颜色 console 输出、稳定 event/component 字段和进程内单调序号；
-6. `pkg/api/health` 与 `pkg/api/httpserver` 中基于 Fiber 3.4.0 的运维 HTTP 适配器，提供框架无关 readiness authority、`/livez`、`/readyz`、有界请求、deadline、稳定 JSON 错误、panic 隔离、脱敏访问日志以及由未来 runtime owner 调用的 `Serve`/`Shutdown`。
+6. `pkg/api/health` 与 `pkg/api/httpserver` 中基于 Fiber 3.4.0 的运维 HTTP 适配器，提供框架无关、无阻塞的原子 readiness tracker、`/livez`、`/readyz`、无请求体的 GET-only 探针、总读缓冲预算、deadline、稳定 JSON 错误、panic 隔离、脱敏访问日志以及由未来 runtime owner 调用的单次 `Serve`/终止式 `Shutdown`。
 
 裸执行 `finalweave-node` 会以非零状态明确拒绝启动，且不存在 `run`、`start` 或 `serve` 子命令；`--help` 和 `version` 是仅有的成功诊断路径。因此它不会打开存储、监听网络、产生签名、处理交易或声称 validator ready。此限制是防止 Bootstrap 被误当成共识实现的安全边界。
 
@@ -28,13 +28,13 @@
 | Go module | 单 module；`go.mod` 最低 1.26.5，CI 固定 1.26.5 | 本地更新工具链允许先验证，但合并结果以固定 CI 为准；暂不使用 `go.work` 或多 module |
 | CLI | Cobra 1.10.2 | `cmd` 只负责装配和退出；诊断命令不触发未来节点配置 |
 | 日志 | zerolog 1.35.1 | 默认契约是 JSON、同步写入和显式注入；console 仅供本地阅读；不使用全局 logger，不记录 payload、密钥、token、原始交易或 KMS/provider 错误细节 |
-| 运维 HTTP | Fiber 3.4.0 | 只提供 health adapter 与生命周期边界；严格 body/header/connection/timeout 上限，禁用 prefork 与启动 banner；当前 CLI 不创建 listener，也不提供业务 route |
+| 运维 HTTP | Fiber 3.4.0 | 只提供 health adapter 与生命周期边界；探针仅接受无 body 的 GET，请求读缓冲、并发连接及两者乘积均有硬上限，并限制所有 timeout；禁用 prefork 与启动 banner；当前 CLI 不创建 listener，也不提供业务 route |
 | 核心包 | 优先标准库 | 没有真实消费者前不引入数据库、网络、日志或配置依赖 |
 | 测试 | unit、race、Fuzz target | Fuzz seed 会随普通测试执行；长时间 Fuzz 后续单独加门禁 |
 | CI | module verify/tidy、gofmt、vet、unit、race、架构检查、Linux 双架构构建 | 不创建空 integration、E2E、Chaos 或 benchmark job |
 | 依赖更新 | Dependabot security updates | routine Go 版本 PR 默认关闭，避免淹没安全修复 |
 
-zerolog 已作为结构化日志适配器落地；它复用 TrustDB 的技术选型和显式注入方式，但首批不复制文件轮转、异步队列或丢弃策略。Fiber 是按项目要求新增的 HTTP 适配器，继续复用 TrustDB 的有界输入、显式 timeout、恢复先于 readiness、listener 由 composition root 持有等工程边界，不照搬 TrustDB 无条件成功的 health 语义。Viper、Prometheus、规范 CBOR、gRPC、Pebble 等仍未作为 FinalWeave 的直接适配器或协议实现落地；Fiber 模块图中用于其通用序列化能力的传递依赖不构成 FinalWeave canonical CBOR 选型。FinalWeave 的本地配置、规范编码和严格签名验证比 TrustDB 具有额外 fail-closed 要求，必须在相应规范、负向语料和测试向量就绪后独立实现。
+zerolog 已作为结构化日志适配器落地；它复用 TrustDB 的技术选型和显式注入方式，但首批不复制文件轮转、异步队列或丢弃策略。Fiber 是按项目要求新增的 HTTP 适配器，继续复用 TrustDB 的有界输入、显式 timeout、恢复先于 readiness、listener 由 composition root 持有等工程边界，不照搬 TrustDB 无条件成功的 health 语义。请求路径只读取 atomic readiness snapshot，不调用 runtime、存储或 provider；这保证探针不会因恢复锁、外部 I/O 或失控回调耗尽连接。Viper、Prometheus、规范 CBOR、gRPC、Pebble 等仍未作为 FinalWeave 的直接适配器或协议实现落地；Fiber 模块图中用于其通用序列化能力的传递依赖不构成 FinalWeave canonical CBOR 选型。FinalWeave 的本地配置、规范编码和严格签名验证比 TrustDB 具有额外 fail-closed 要求，必须在相应规范、负向语料和测试向量就绪后独立实现。
 
 ## 3. 当前目录与职责
 
@@ -42,7 +42,7 @@ zerolog 已作为结构化日志适配器落地；它复用 TrustDB 的技术选
 cmd/finalweave-node/     薄进程入口；只装配诊断命令
 internal/buildinfo/      进程构建元数据，不进入协议身份或哈希
 internal/cli/            CLI 命令装配和输出格式
-pkg/api/health/          框架无关的本地 readiness 契约
+pkg/api/health/          框架无关、无阻塞的本地 readiness 快照
 pkg/api/httpserver/      Fiber 运维 HTTP 适配器；不进入协议身份或哈希
 pkg/types/               可复用的纯协议值与不变量
 pkg/observability/       可复用结构化日志适配器，不进入协议身份或哈希
@@ -84,8 +84,8 @@ flowchart TB
 - channel、队列、缓存、分页、重试和并发度必须有硬上限及满载策略；
 - 共识、执行和证明核心不直接读取墙钟、环境变量、随机数、网络或全局 logger；
 - 日志由 composition root 创建并显式注入；组件只记录有界、经过允许的元数据，普通日志不承担协议证据或安全审计持久化语义；
-- HTTP 构造函数只校验并装配 Fiber；listener、TLS 包装、goroutine、失败监督和关闭顺序由未来 node composition root 持有，且恢复/身份/容量门禁通过前不得调用 `Serve`；
-- `/livez` 只证明 HTTP event loop 能响应，`/readyz` 只转发注入的 readiness authority；两者都不是共识最终性、Validator readiness 或业务 API 可用性的替代证明；
+- HTTP 构造函数只校验并装配 Fiber；listener、TLS 包装、goroutine、失败监督和关闭顺序由未来 node composition root 持有，且恢复/身份/容量门禁通过前不得调用 `Serve`；同一个 adapter 只允许一次 `Serve`，`Shutdown` 进入终止状态后禁止重新启动；
+- `/livez` 只证明 HTTP event loop 能响应，`/readyz` 只读取 runtime owner 主动投影到 atomic tracker 的有界状态；请求路径不进入 runtime，也不等待存储或网络。两者都不是共识最终性、Validator readiness 或业务 API 可用性的替代证明；
 - network、storage、API 和 signer 都通过窄接口注入；
 - 恢复和交叉校验完成前不得开放 readiness 或外部 listener；
 - Safety WAL 在任何可能双签的签名之前严格持久化，恢复歧义必须 fail closed。
@@ -119,4 +119,4 @@ go build -trimpath -o ./bin/finalweave-node ./cmd/finalweave-node
 
 未来发布构建必须通过 `-ldflags -X` 注入 `internal/buildinfo` 的 version、commit 和 date；当前尚无发布流水线。无论是否注入，这些值都只用于诊断，不参与协议版本、对象身份或共识判断。
 
-这套 Bootstrap 只是可持续实现的起点，不代表[实施路线](04-implementation-roadmap.md)阶段 0 已完成。日志与 Fiber 适配器已对实际调用点执行 allowlist、panic、deadline、body/header 上限和敏感数据负测，但尚无节点配置 loader、TLS/mTLS、runtime supervisor 或活动 listener；阶段 0 还需要独立落地完整错误码、严格配置、gRPC、metrics、虚拟时钟、确定性网络模拟器、SBOM、依赖策略和相应 ADR。
+这套 Bootstrap 只是可持续实现的起点，不代表[实施路线](04-implementation-roadmap.md)阶段 0 已完成。日志与 Fiber 适配器已对实际调用点执行 allowlist、panic、deadline、bodyless GET-only 探针、读缓冲总预算、启动/关闭竞态和敏感数据负测，但尚无节点配置 loader、TLS/mTLS、runtime supervisor 或活动 listener；阶段 0 还需要独立落地完整错误码、严格配置、gRPC、metrics、虚拟时钟、确定性网络模拟器、SBOM、依赖策略和相应 ADR。

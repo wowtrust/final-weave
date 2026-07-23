@@ -123,7 +123,7 @@ python3 scripts/check_docs.py
 python3 scripts/check_go_architecture.py
 ```
 
-当前二进制只提供可复用、可测试的版本诊断入口，不会启动网络、监听端口或运行共识。`pkg/observability` 已提供严格校验、显式注入、同步写入的 JSON/console logger；`pkg/api/httpserver` 已提供 Fiber 3.4.0 运维适配器、受限请求上下文、脱敏访问日志、panic 隔离、`/livez` 与由外部 readiness authority 驱动的 `/readyz`。两者的构造函数都不启动 goroutine；HTTP listener、TLS、恢复门禁和生命周期装配仍不存在。完整本地门禁还包括 `go vet ./...` 和 `go test -race ./...`。已配置 GitHub SSH key 的开发者也可以使用 `git@github.com:wowtrust/final-weave.git`。文档采用普通 Markdown 和内嵌 Mermaid，不需要专用站点生成器；两个校验脚本仅依赖 Python 3 标准库，其中代码架构检查会调用 Go 工具链。
+当前二进制只提供可复用、可测试的版本诊断入口，不会启动网络、监听端口或运行共识。`pkg/observability` 已提供严格校验、显式注入、同步写入的 JSON/console logger；`pkg/api/httpserver` 已提供 Fiber 3.4.0 运维适配器、无请求体的 GET-only 探针、总读缓冲预算、受限请求上下文、脱敏访问日志、panic 隔离、`/livez` 与读取原子 readiness tracker 的 `/readyz`。两者的构造函数都不启动 goroutine；HTTP listener、TLS、恢复门禁和进程级生命周期装配仍不存在。完整本地门禁还包括 `go vet ./...` 和 `go test -race ./...`。已配置 GitHub SSH key 的开发者也可以使用 `git@github.com:wowtrust/final-weave.git`。文档采用普通 Markdown 和内嵌 Mermaid，不需要专用站点生成器；两个校验脚本仅依赖 Python 3 标准库，其中代码架构检查会调用 Go 工具链。
 
 ## 当前路线
 
