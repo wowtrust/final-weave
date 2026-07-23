@@ -89,7 +89,7 @@ flowchart TB
 - channel、队列、缓存、分页、重试和并发度必须有硬上限及满载策略；
 - 共识、执行和证明核心不直接读取墙钟、环境变量、随机数、网络或全局 logger；
 - 日志由 composition root 创建并显式注入；组件只记录有界、经过允许的元数据，普通日志不承担协议证据或安全审计持久化语义；
-- HTTP 构造函数只校验并装配 Fiber；listener、TLS 包装、goroutine、失败监督和关闭顺序由未来 node composition root 持有，且恢复/身份/容量门禁通过前不得调用 `Serve`；同一个 adapter 只允许一次 `Serve`，`Shutdown` 进入终止状态后禁止重新启动；
+- HTTP 构造函数只校验并装配 Fiber；listener、TLS 包装、goroutine、失败监督和关闭顺序由未来 node composition root 持有，且恢复/身份/容量门禁通过前不得调用 `Serve`；同一个 adapter 只允许一次 `Serve`，首个 bounded caller 持有 Shutdown drain，后到并发 caller 共享其完整结果，进入终止状态后禁止重新启动；
 - `/livez` 只证明 HTTP event loop 能响应，`/readyz` 只读取 runtime owner 主动投影到 atomic tracker 的有界状态；请求路径不进入 runtime，也不等待存储或网络。两者都不是共识最终性、Validator readiness 或业务 API 可用性的替代证明；
 - gRPC 构造函数只装配 grpc-go、标准 Health 与 interceptor，不绑定 listener、启动 goroutine、注册 reflection 或伪造业务 service；Health 初始为 `NOT_SERVING`，Check/List 读取 tracker 快照，Watch 更新由 runtime owner 显式 `RefreshHealth`，停止时先发布 `NOT_SERVING` 再按首个 caller deadline 执行 GracefulStop→Stop，并发 Shutdown 共享该完整结果；adapter 的资源乘积上限按单条 HTTP/2 连接计算，未来 composition root 还必须限制 listener 的进程级连接数；
 - network、storage、API 和 signer 都通过窄接口注入；

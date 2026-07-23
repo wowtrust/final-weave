@@ -209,8 +209,9 @@ func (s *Server) Serve(listener net.Listener) error {
 	return err
 }
 
-// Shutdown drains the Fiber server until ctx expires. Calling Shutdown before
-// Serve or after a completed shutdown is harmless.
+// Shutdown drains the Fiber server until the initiating ctx expires. Concurrent
+// callers wait for that same terminal result. Calling Shutdown before Serve or
+// after a completed shutdown is harmless.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		return ErrNilShutdownContext
@@ -233,7 +234,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	case stateStopping:
 		done := s.shutdownDone
 		s.mu.Unlock()
-		return s.waitForShutdown(ctx, done)
+		return s.waitForShutdown(done)
 	case stateStarting:
 		s.state = stateStopping
 		listener := s.listener
@@ -270,16 +271,12 @@ func (s *Server) finishShutdown(err error) error {
 	return err
 }
 
-func (s *Server) waitForShutdown(ctx context.Context, done <-chan struct{}) error {
-	select {
-	case <-done:
-		s.mu.Lock()
-		err := s.shutdownErr
-		s.mu.Unlock()
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+func (s *Server) waitForShutdown(done <-chan struct{}) error {
+	<-done
+	s.mu.Lock()
+	err := s.shutdownErr
+	s.mu.Unlock()
+	return err
 }
 
 func waitForServeExit(ctx context.Context, done <-chan struct{}) error {
