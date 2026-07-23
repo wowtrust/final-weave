@@ -109,7 +109,7 @@ func New(
 	readiness *health.Tracker,
 	logger *observability.Logger,
 ) (*Server, error) {
-	if root == nil {
+	if isNilInterface(root) {
 		return nil, ErrNilRootContext
 	}
 	if readiness == nil {
@@ -213,7 +213,7 @@ func (s *Server) Serve(listener net.Listener) error {
 // callers wait for that same terminal result. Calling Shutdown before Serve or
 // after a completed shutdown is harmless.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if ctx == nil {
+	if isNilInterface(ctx) {
 		return ErrNilShutdownContext
 	}
 	if _, bounded := ctx.Deadline(); !bounded {

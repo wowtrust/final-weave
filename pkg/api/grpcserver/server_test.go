@@ -28,6 +28,7 @@ func TestNewValidatesDependenciesWithoutStartingWork(t *testing.T) {
 	tracker := health.NewTracker()
 	logger, _ := testLogger(t)
 	valid := DefaultConfig()
+	var typedNilRoot *panicOnUseContext
 	tests := []struct {
 		name    string
 		root    context.Context
@@ -37,6 +38,13 @@ func TestNewValidatesDependenciesWithoutStartingWork(t *testing.T) {
 	}{
 		{
 			name:    "nil root",
+			tracker: tracker,
+			logger:  logger,
+			want:    ErrNilRootContext,
+		},
+		{
+			name:    "typed nil root",
+			root:    typedNilRoot,
 			tracker: tracker,
 			logger:  logger,
 			want:    ErrNilRootContext,
@@ -98,6 +106,10 @@ func TestShutdownBeforeServeIsTerminal(t *testing.T) {
 	if err := server.Shutdown(nil); !errors.Is(err, ErrNilShutdownContext) {
 		t.Fatalf("Shutdown(nil) error = %v, want ErrNilShutdownContext", err)
 	}
+	var typedNilShutdown *panicOnUseContext
+	if err := server.Shutdown(typedNilShutdown); !errors.Is(err, ErrNilShutdownContext) {
+		t.Fatalf("Shutdown(typed nil) error = %v, want ErrNilShutdownContext", err)
+	}
 	if err := server.Shutdown(context.Background()); !errors.Is(err, ErrUnboundedShutdownContext) {
 		t.Fatalf("Shutdown(background) error = %v, want ErrUnboundedShutdownContext", err)
 	}
@@ -127,6 +139,24 @@ func TestShutdownBeforeServeIsTerminal(t *testing.T) {
 	if _, err := net.DialTimeout("tcp", address, 100*time.Millisecond); err == nil {
 		t.Fatal("Serve() after Shutdown left the supplied listener open")
 	}
+}
+
+type panicOnUseContext struct{}
+
+func (*panicOnUseContext) Deadline() (time.Time, bool) {
+	panic("typed nil context must be rejected before Deadline")
+}
+
+func (*panicOnUseContext) Done() <-chan struct{} {
+	panic("typed nil context must be rejected before Done")
+}
+
+func (*panicOnUseContext) Err() error {
+	panic("typed nil context must be rejected before Err")
+}
+
+func (*panicOnUseContext) Value(any) any {
+	panic("typed nil context must be rejected before Value")
 }
 
 func TestStandardHealthTracksBoundedReadiness(t *testing.T) {
