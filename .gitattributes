@@ -1,0 +1,3 @@
+# The imported specification corpus uses Markdown hard line breaks intentionally.
+doc/*.md whitespace=-trailing-space,-blank-at-eof
+doc/**/*.md whitespace=-trailing-space,-blank-at-eof

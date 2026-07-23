@@ -1,0 +1,79 @@
+name: Feature request
+description: Propose a new FinalWeave capability or a change to the target design.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Describe the user, validator, operator, application, or developer outcome this feature should enable.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior or design
+      description: State what the repository implements or specifies today and where the gap is.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed behavior
+      description: Describe the protocol object, state transition, API, storage, operations, or user-visible behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: List what this iteration intentionally will not solve.
+    validations:
+      required: true
+  - type: checkboxes
+    id: protocol
+    attributes:
+      label: Protocol and compatibility impact
+      options:
+        - label: Changes quorum, fault, slot, ordering, stable-prefix, or epoch rules.
+        - label: Changes BatchAC, erasure coding, DAG validation, or data-retention semantics.
+        - label: Changes canonical encoding, cryptography, signatures, IDs, schemas, or state commitments.
+        - label: Changes deterministic execution, gas, state, receipts, or resource accounting.
+        - label: Changes FinalityCertificate, FinalityProof, trust roots, or proof verification.
+        - label: Changes WAL, storage, snapshot, pruning, replay, recovery, or synchronization.
+        - label: Changes networking, APIs, cross-ledger messaging, deployment, or operations.
+        - label: Requires an ADR, versioned format, migration, or epoch-boundary activation.
+        - label: No protocol or compatibility impact expected.
+  - type: textarea
+    id: scale
+    attributes:
+      label: Scale, failure, and operations impact
+      description: Include Byzantine work bounds, data size, CPU, memory, disk, network, retry, overload, recovery, observability, and deployment behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain why simpler, existing, or composable mechanisms do not meet the goal.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      placeholder: |
+        - Specification and ADR changes
+        - Cross-implementation vectors and negative cases
+        - Model, Byzantine, recovery, and performance gates
+    validations:
+      required: true

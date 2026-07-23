@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: FinalWeave contribution guide
+    url: https://github.com/wowtrust/final-weave/blob/main/CONTRIBUTING.md
+    about: Read the issue, branch, PR, commit, safety-boundary, and validation standards before opening work.
+  - name: Private security report
+    url: https://github.com/wowtrust/final-weave/security/advisories/new
+    about: Report suspected vulnerabilities privately instead of opening a public issue.

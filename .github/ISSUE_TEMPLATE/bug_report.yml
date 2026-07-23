@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a defect in implemented behavior, executable tooling, tests, or normative documentation.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for observable behavior that is broken, unsafe, non-deterministic, too slow, unrecoverable, or inconsistent with the accepted specification. Report exploitable security issues privately.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Data model / canonical encoding / cryptography
+        - Data availability / BatchAC / erasure coding
+        - BlockDAG storage / validation / synchronization
+        - FinalDAG-C consensus / ordering
+        - Deterministic execution / state / gas
+        - Finality certificate / proof verification
+        - Storage / WAL / snapshot / pruning / recovery
+        - Networking / peer admission / API
+        - Cross-ledger messaging
+        - Genesis / configuration / epoch / governance
+        - Security / keys / operations
+        - Testing / model checking / performance
+        - CI / release / repository governance
+        - Documentation / tutorial / ADR
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What broke
+      description: Describe the observable failure and why it matters. State whether this concerns implemented behavior or a contradiction in the target specification.
+      placeholder: Two valid traces produce different stable-prefix decisions for the same proposer slot.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Cite the relevant invariant, ADR, protocol section, API contract, or test vector when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction or counterexample
+      description: Provide the smallest trace, commands, messages, objects, configuration, or state needed to reproduce.
+      placeholder: |
+        1. Start from ...
+        2. Deliver ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Include sanitized logs, traces, object IDs, test vectors, model output, screenshots, or CI links. Do not include secrets or production data.
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact
+      options:
+        - label: Safety, quorum intersection, ordering, or execution determinism may be affected.
+        - label: Liveness, data availability, synchronization, or recovery may be affected.
+        - label: Finality proofs, canonical encoding, signatures, IDs, or trust roots may be affected.
+        - label: Stored state, WAL, snapshots, pruning, or compatibility may be affected.
+        - label: Security, authentication, authorization, keys, or resource exhaustion may be affected.
+        - label: Performance or large-data behavior may be affected.
+        - label: Unknown until investigated.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the conditions and negative cases that prove the bug is fixed.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List documentation checks, tests, vectors, models, recovery cases, or benchmarks required.
+      placeholder: |
+        - python3 scripts/check_docs.py
+        - Add a minimal conflicting-trace test vector
+    validations:
+      required: true
