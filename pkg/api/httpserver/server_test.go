@@ -386,6 +386,10 @@ func TestRequestContextCarriesDeadlineAndRequestID(t *testing.T) {
 	if got := RequestID(nil); got != "" {
 		t.Fatalf("RequestID(nil) = %q, want empty", got)
 	}
+	var typedNil *panicOnUseContext
+	if got := RequestID(typedNil); got != "" {
+		t.Fatalf("RequestID(typed nil) = %q, want empty", got)
+	}
 }
 
 func TestProbeRejectsAnyRequestBodyWithoutDisclosure(t *testing.T) {

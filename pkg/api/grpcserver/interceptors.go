@@ -26,7 +26,7 @@ type requestIDContextKey struct{}
 
 // RequestID returns the validated gRPC request ID stored in ctx, if present.
 func RequestID(ctx context.Context) string {
-	if ctx == nil {
+	if isNilInterface(ctx) {
 		return ""
 	}
 	requestID, _ := ctx.Value(requestIDContextKey{}).(string)
