@@ -26,48 +26,37 @@ import (
 func TestNewValidatesDependenciesAndLimits(t *testing.T) {
 	t.Parallel()
 
-	provider := health.ProviderFunc(func(context.Context) health.Readiness {
-		return health.Readiness{Reason: health.ReasonRuntimeUnavailable}
-	})
+	tracker := health.NewTracker()
 	logger, _ := testLogger(t)
 	valid := DefaultConfig()
-	var typedNilProvider health.ProviderFunc
 
 	tests := []struct {
 		name      string
 		root      context.Context
 		config    Config
-		readiness health.Provider
+		readiness *health.Tracker
 		logger    *observability.Logger
 		want      error
 	}{
 		{
 			name:      "nil root context",
 			config:    valid,
-			readiness: provider,
+			readiness: tracker,
 			logger:    logger,
 			want:      ErrNilRootContext,
 		},
 		{
-			name:   "nil readiness provider",
+			name:   "nil readiness tracker",
 			root:   context.Background(),
 			config: valid,
 			logger: logger,
-			want:   ErrNilReadinessProvider,
-		},
-		{
-			name:      "typed nil readiness provider",
-			root:      context.Background(),
-			config:    valid,
-			readiness: typedNilProvider,
-			logger:    logger,
-			want:      ErrNilReadinessProvider,
+			want:   ErrNilReadinessTracker,
 		},
 		{
 			name:      "nil logger",
 			root:      context.Background(),
 			config:    valid,
-			readiness: provider,
+			readiness: tracker,
 			want:      ErrNilLogger,
 		},
 	}
@@ -76,12 +65,17 @@ func TestNewValidatesDependenciesAndLimits(t *testing.T) {
 		name   string
 		mutate func(*Config)
 	}{
-		{name: "zero wire bytes", mutate: func(config *Config) { config.MaxHTTPWireBytes = 0 }},
-		{name: "excessive wire bytes", mutate: func(config *Config) { config.MaxHTTPWireBytes = maxHTTPWireBytes + 1 }},
 		{name: "zero read buffer", mutate: func(config *Config) { config.ReadBufferBytes = 0 }},
 		{name: "excessive read buffer", mutate: func(config *Config) { config.ReadBufferBytes = maxReadBuffer + 1 }},
 		{name: "zero connections", mutate: func(config *Config) { config.MaxConnections = 0 }},
 		{name: "excessive connections", mutate: func(config *Config) { config.MaxConnections = maxConnections + 1 }},
+		{
+			name: "excessive aggregate read buffer",
+			mutate: func(config *Config) {
+				config.ReadBufferBytes = maxReadBuffer
+				config.MaxConnections = maxAggregateReadBufferSize/maxReadBuffer + 1
+			},
+		},
 		{name: "zero read timeout", mutate: func(config *Config) { config.ReadTimeout = 0 }},
 		{name: "negative write timeout", mutate: func(config *Config) { config.WriteTimeout = -time.Second }},
 		{name: "excessive idle timeout", mutate: func(config *Config) { config.IdleTimeout = maxTimeout + time.Nanosecond }},
@@ -94,14 +88,14 @@ func TestNewValidatesDependenciesAndLimits(t *testing.T) {
 			name      string
 			root      context.Context
 			config    Config
-			readiness health.Provider
+			readiness *health.Tracker
 			logger    *observability.Logger
 			want      error
 		}{
 			name:      invalid.name,
 			root:      context.Background(),
 			config:    config,
-			readiness: provider,
+			readiness: tracker,
 			logger:    logger,
 			want:      ErrInvalidConfig,
 		})
@@ -116,12 +110,19 @@ func TestNewValidatesDependenciesAndLimits(t *testing.T) {
 			}
 		})
 	}
+
+	boundary := valid
+	boundary.ReadBufferBytes = maxReadBuffer
+	boundary.MaxConnections = maxAggregateReadBufferSize / maxReadBuffer
+	if _, err := New(context.Background(), boundary, tracker, logger); err != nil {
+		t.Fatalf("New() at aggregate read-buffer boundary error = %v", err)
+	}
 }
 
 func TestNewHasNoListenerSideEffect(t *testing.T) {
 	t.Parallel()
 
-	server, _ := newTestServer(t, DefaultConfig(), unavailableProvider())
+	server, _ := newTestServer(t, DefaultConfig(), unavailableTracker())
 	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownContext); err != nil {
@@ -140,19 +141,22 @@ func TestNewHasNoListenerSideEffect(t *testing.T) {
 	if err := server.Shutdown(context.Background()); !errors.Is(err, ErrUnboundedShutdownContext) {
 		t.Fatalf("Shutdown(background) error = %v, want ErrUnboundedShutdownContext", err)
 	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	defer listener.Close()
+	if err := server.Serve(listener); !errors.Is(err, ErrServerStopped) {
+		t.Fatalf("Serve() after terminal Shutdown error = %v, want ErrServerStopped", err)
+	}
 }
 
-func TestOperationalProbesFollowReadinessAuthority(t *testing.T) {
+func TestOperationalProbesFollowReadinessTracker(t *testing.T) {
 	t.Parallel()
 
-	var ready atomic.Bool
-	provider := health.ProviderFunc(func(context.Context) health.Readiness {
-		if ready.Load() {
-			return health.Readiness{Ready: true}
-		}
-		return health.Readiness{Reason: health.ReasonRuntimeUnavailable}
-	})
-	server, _ := newTestServer(t, DefaultConfig(), provider)
+	tracker := health.NewTracker()
+	server, _ := newTestServer(t, DefaultConfig(), tracker)
 
 	live := testRequest(t, server, http.MethodGet, livezPath, http.NoBody, nil)
 	assertResponse(t, live, fiber.StatusOK, `{"status":"live"}`)
@@ -161,7 +165,7 @@ func TestOperationalProbesFollowReadinessAuthority(t *testing.T) {
 	notReady := testRequest(t, server, http.MethodGet, readyzPath, http.NoBody, nil)
 	assertResponse(t, notReady, fiber.StatusServiceUnavailable, `{"status":"not_ready","reason":"runtime_unavailable"}`)
 
-	ready.Store(true)
+	tracker.Store(health.Readiness{Ready: true})
 	readyResponse := testRequest(t, server, http.MethodGet, readyzPath, http.NoBody, nil)
 	assertResponse(t, readyResponse, fiber.StatusOK, `{"status":"ready"}`)
 
@@ -179,10 +183,9 @@ func TestOperationalProbesFollowReadinessAuthority(t *testing.T) {
 func TestUnknownReadinessReasonIsSanitized(t *testing.T) {
 	t.Parallel()
 
-	provider := health.ProviderFunc(func(context.Context) health.Readiness {
-		return health.Readiness{Reason: health.Reason("kms://secret-provider-detail")}
-	})
-	server, logs := newTestServer(t, DefaultConfig(), provider)
+	tracker := health.NewTracker()
+	tracker.Store(health.Readiness{Reason: health.Reason("kms://secret-provider-detail")})
+	server, logs := newTestServer(t, DefaultConfig(), tracker)
 	response := testRequest(t, server, http.MethodGet, readyzPath, http.NoBody, nil)
 	assertResponse(t, response, fiber.StatusServiceUnavailable, `{"status":"not_ready","reason":"unavailable"}`)
 	if strings.Contains(logs.String(), "secret-provider-detail") {
@@ -193,11 +196,11 @@ func TestUnknownReadinessReasonIsSanitized(t *testing.T) {
 func TestRequestMetadataAndLogsExcludeSecrets(t *testing.T) {
 	t.Parallel()
 
-	server, logs := newTestServer(t, DefaultConfig(), unavailableProvider())
+	server, logs := newTestServer(t, DefaultConfig(), unavailableTracker())
 	request := httptest.NewRequest(
 		http.MethodGet,
 		readyzPath+"?token=query-secret",
-		strings.NewReader("body-secret"),
+		http.NoBody,
 	)
 	request.Header.Set(requestIDHeader, "safe.request-1")
 	request.Header.Set("Authorization", "Bearer authorization-secret")
@@ -216,7 +219,6 @@ func TestRequestMetadataAndLogsExcludeSecrets(t *testing.T) {
 	logText := logs.String()
 	for _, secret := range []string{
 		"query-secret",
-		"body-secret",
 		"authorization-secret",
 		"cookie-secret",
 		"header-secret",
@@ -261,7 +263,7 @@ func TestRequestMetadataAndLogsExcludeSecrets(t *testing.T) {
 func TestUnsafeRequestIDIsReplaced(t *testing.T) {
 	t.Parallel()
 
-	server, logs := newTestServer(t, DefaultConfig(), unavailableProvider())
+	server, logs := newTestServer(t, DefaultConfig(), unavailableTracker())
 	request := httptest.NewRequest(http.MethodGet, livezPath, http.NoBody)
 	request.Header.Set(requestIDHeader, "unsafe/id?request-secret")
 	response, err := server.app.Test(request)
@@ -285,11 +287,20 @@ func TestUnsafeRequestIDIsReplaced(t *testing.T) {
 func TestPanicRecoveryDoesNotExposePanicValue(t *testing.T) {
 	t.Parallel()
 
-	provider := health.ProviderFunc(func(context.Context) health.Readiness {
+	logger, logs := testLogger(t)
+	app := fiber.New(fiber.Config{ErrorHandler: stableErrorHandler})
+	app.Use(requestContextMiddleware(context.Background(), time.Second, &atomic.Uint64{}))
+	app.Use(accessLogMiddleware(logger.Component("http")))
+	app.Use(recoverMiddleware(logger.Component("http")))
+	app.Get("/panic", func(fiber.Ctx) error {
 		panic("panic-secret")
 	})
-	server, logs := newTestServer(t, DefaultConfig(), provider)
-	response := testRequest(t, server, http.MethodGet, readyzPath, http.NoBody, nil)
+
+	request := httptest.NewRequest(http.MethodGet, "/panic", http.NoBody)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
 	assertResponse(t, response, fiber.StatusInternalServerError, `{"error":"internal_error"}`)
 	if strings.Contains(logs.String(), "panic-secret") {
 		t.Fatalf("panic response logs disclose panic value: %q", logs.String())
@@ -298,10 +309,14 @@ func TestPanicRecoveryDoesNotExposePanicValue(t *testing.T) {
 		t.Fatalf("panic log event missing: %q", logs.String())
 	}
 
-	live := testRequest(t, server, http.MethodGet, livezPath, http.NoBody, nil)
-	if live.StatusCode != fiber.StatusOK {
-		t.Fatalf("server did not continue after recovered panic: status %d", live.StatusCode)
+	secondResponse, err := app.Test(httptest.NewRequest(http.MethodGet, "/panic", http.NoBody))
+	if err != nil {
+		t.Fatalf("second app.Test() error = %v", err)
 	}
+	if secondResponse.StatusCode != fiber.StatusInternalServerError {
+		t.Fatalf("server did not continue after recovered panic: status %d", secondResponse.StatusCode)
+	}
+	secondResponse.Body.Close()
 }
 
 func TestRequestContextCarriesDeadlineAndRequestID(t *testing.T) {
@@ -311,76 +326,53 @@ func TestRequestContextCarriesDeadlineAndRequestID(t *testing.T) {
 	config.RequestTimeout = 200 * time.Millisecond
 	var observedDeadline time.Time
 	var observedRequestID string
-	provider := health.ProviderFunc(func(ctx context.Context) health.Readiness {
-		observedDeadline, _ = ctx.Deadline()
-		observedRequestID = RequestID(ctx)
-		return health.Readiness{Reason: health.ReasonRecovering}
+	app := fiber.New()
+	app.Use(requestContextMiddleware(context.Background(), config.RequestTimeout, &atomic.Uint64{}))
+	app.Get("/context", func(ctx fiber.Ctx) error {
+		observedDeadline, _ = ctx.Context().Deadline()
+		observedRequestID = RequestID(ctx.Context())
+		return ctx.SendStatus(fiber.StatusNoContent)
 	})
-	server, _ := newTestServer(t, config, provider)
 
 	before := time.Now()
-	request := httptest.NewRequest(http.MethodGet, readyzPath, http.NoBody)
+	request := httptest.NewRequest(http.MethodGet, "/context", http.NoBody)
 	request.Header.Set(requestIDHeader, "deadline-test")
-	response, err := server.app.Test(request)
+	response, err := app.Test(request)
 	if err != nil {
 		t.Fatalf("app.Test() error = %v", err)
 	}
 	response.Body.Close()
 
 	if observedDeadline.IsZero() {
-		t.Fatal("provider context has no deadline")
+		t.Fatal("request context has no deadline")
 	}
 	if observedDeadline.Before(before) || observedDeadline.After(before.Add(config.RequestTimeout+100*time.Millisecond)) {
-		t.Fatalf("provider deadline = %s, want within request timeout", observedDeadline)
+		t.Fatalf("request deadline = %s, want within request timeout", observedDeadline)
 	}
 	if observedRequestID != "deadline-test" {
-		t.Fatalf("provider request ID = %q, want deadline-test", observedRequestID)
+		t.Fatalf("request ID = %q, want deadline-test", observedRequestID)
 	}
 	if got := RequestID(nil); got != "" {
 		t.Fatalf("RequestID(nil) = %q, want empty", got)
 	}
 }
 
-func TestBodyLimitAcceptsBoundaryAndRejectsOneByteOver(t *testing.T) {
+func TestProbeRejectsAnyRequestBodyWithoutDisclosure(t *testing.T) {
 	t.Parallel()
 
-	config := DefaultConfig()
-	config.MaxHTTPWireBytes = 64
-	server, _ := newTestServer(t, config, unavailableProvider())
-
-	atLimit := testRequest(
-		t,
-		server,
-		http.MethodGet,
-		readyzPath,
-		strings.NewReader(strings.Repeat("a", config.MaxHTTPWireBytes)),
-		nil,
-	)
-	if atLimit.StatusCode != fiber.StatusServiceUnavailable {
-		t.Fatalf("body at limit status = %d, want %d", atLimit.StatusCode, fiber.StatusServiceUnavailable)
-	}
-
-	overRequest := httptest.NewRequest(
-		http.MethodGet,
-		readyzPath,
-		strings.NewReader(strings.Repeat("b", config.MaxHTTPWireBytes+1)),
-	)
-	if _, err := server.app.Test(overRequest); err == nil {
-		t.Fatal("body one byte over limit was accepted")
+	server, logs := newTestServer(t, DefaultConfig(), unavailableTracker())
+	response := testRequest(t, server, http.MethodGet, readyzPath, strings.NewReader("body-secret"), nil)
+	assertResponse(t, response, fiber.StatusBadRequest, `{"error":"invalid_request"}`)
+	if strings.Contains(logs.String(), "body-secret") {
+		t.Fatalf("probe body leaked to logs: %q", logs.String())
 	}
 }
 
 func TestConcurrentReadinessRequestsAreRaceSafe(t *testing.T) {
 	t.Parallel()
 
-	var ready atomic.Bool
-	provider := health.ProviderFunc(func(context.Context) health.Readiness {
-		if ready.Load() {
-			return health.Readiness{Ready: true}
-		}
-		return health.Readiness{Reason: health.ReasonRecovering}
-	})
-	server, _ := newTestServer(t, DefaultConfig(), provider)
+	tracker := health.NewTracker()
+	server, _ := newTestServer(t, DefaultConfig(), tracker)
 
 	const requestCount = 32
 	var group sync.WaitGroup
@@ -388,7 +380,11 @@ func TestConcurrentReadinessRequestsAreRaceSafe(t *testing.T) {
 		group.Add(1)
 		go func(index int) {
 			defer group.Done()
-			ready.Store(index%2 == 0)
+			if index%2 == 0 {
+				tracker.Store(health.Readiness{Ready: true})
+			} else {
+				tracker.Store(health.Readiness{Reason: health.ReasonRecovering})
+			}
 			request := httptest.NewRequest(http.MethodGet, readyzPath, http.NoBody)
 			response, err := server.app.Test(request)
 			if err != nil {
@@ -404,21 +400,19 @@ func TestConcurrentReadinessRequestsAreRaceSafe(t *testing.T) {
 	group.Wait()
 }
 
-func unavailableProvider() health.Provider {
-	return health.ProviderFunc(func(context.Context) health.Readiness {
-		return health.Readiness{Reason: health.ReasonRuntimeUnavailable}
-	})
+func unavailableTracker() *health.Tracker {
+	return health.NewTracker()
 }
 
 func newTestServer(
 	t *testing.T,
 	config Config,
-	provider health.Provider,
+	tracker *health.Tracker,
 ) (*Server, *bytes.Buffer) {
 	t.Helper()
 
 	logger, output := testLogger(t)
-	server, err := New(context.Background(), config, provider, logger)
+	server, err := New(context.Background(), config, tracker, logger)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
