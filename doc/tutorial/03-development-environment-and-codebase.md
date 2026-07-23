@@ -5,6 +5,9 @@
 > 重要说明：本文中的目标目录、包和 CLI 是设计；在对应阶段合并前，不应宣称命令或文件已经存在  
 > 上一篇：[02-finalweave-transaction-lifecycle.md](02-finalweave-transaction-lifecycle.md) ｜ 下一篇：[04-first-contribution-tutorial.md](04-first-contribution-tutorial.md)
 
+> [!NOTE]
+> 当前仓库已经实现单 Go module、`finalweave-node version`、`internal/buildinfo`、v1 `n/f/q/k` 参数校验和基础 Go CI。它们是 Bootstrap，不是可运行共识节点，也不表示下方目标目录已经全部存在。当前代码边界见[代码架构与 Bootstrap 基线](../07-code-architecture.md)。
+
 上一章已经把 Alice 的 KVPut 追踪到最终证明。现在的问题变成：怎样组织 Go 工程，才能让 SDK 的规范字节、BatchAC、FinalDAG-C、安全签名槽、并行执行根和证明验证各守边界，同时还能端到端承载同一笔交易？本章从零给出工程 Bootstrap 顺序。
 
 ## 1. 三类命令标签

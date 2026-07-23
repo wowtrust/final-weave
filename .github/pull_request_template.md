@@ -38,6 +38,11 @@ For every unchecked box or affected boundary, explain the ADR, proof obligation,
 
 - [ ] `git diff --check`
 - [ ] `python3 scripts/check_docs.py`
+- [ ] `go mod verify` and a clean `go mod tidy` diff
+- [ ] `go vet ./...`
+- [ ] `go test -count=1 -mod=readonly ./...`
+- [ ] `go test -race -count=1 -mod=readonly ./...`
+- [ ] `python3 scripts/check_go_architecture.py`
 - [ ] Relevant unit, race, property, fuzz, vector, model, Byzantine, partition, crash-recovery, snapshot, chaos, and performance checks
 - [ ] Negative tests cover malformed, conflicting, stale, replayed, oversized, and partially durable inputs where applicable
 
