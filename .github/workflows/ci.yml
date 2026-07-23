@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check whitespace
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA"
+          elif git rev-parse HEAD^1 >/dev/null 2>&1; then
+            git diff --check HEAD^1 HEAD
+          else
+            git diff-tree --check --no-commit-id --root -r HEAD
+          fi
+
+      - name: Check repository governance files
+        shell: bash
+        run: |
+          required=(
+            README.md
+            LICENSE
+            CONTRIBUTING.md
+            SECURITY.md
+            CODE_OF_CONDUCT.md
+            .github/CODEOWNERS
+            .github/commit_message_template.txt
+            .github/dependabot.yml
+            .github/pull_request_template.md
+            .github/ISSUE_TEMPLATE/config.yml
+            .github/ISSUE_TEMPLATE/bug_report.yml
+            .github/ISSUE_TEMPLATE/feature_request.yml
+            .github/ISSUE_TEMPLATE/engineering_task.yml
+          )
+          for path in "${required[@]}"; do
+            test -s "$path" || {
+              echo "::error file=$path::required governance file is missing or empty"
+              exit 1
+            }
+          done
+
+      - name: Parse repository YAML
+        shell: bash
+        run: |
+          ruby -e '
+            require "yaml"
+            Dir[".github/**/*.{yml,yaml}"].sort.each do |path|
+              YAML.parse_file(path)
+              puts "parsed #{path}"
+            end
+          '
+
+      - name: Reject retired or local repository references
+        shell: bash
+        run: |
+          set -euo pipefail
+          retired_owner='ryan-wong-coder'
+          unix_home="/""Users/"
+          backslash='\\'
+          windows_home="[A-Za-z]:${backslash}Users${backslash}"
+          patterns=(
+            "${retired_owner}/(trustdb|final-weave)"
+            "${unix_home}[^/]+/"
+            "${windows_home}"
+          )
+          for pattern in "${patterns[@]}"; do
+            if matches="$(git grep -nE "$pattern")"; then
+              printf '%s\n' "$matches"
+              echo "::error::replace retired repository slugs and local user paths with wowtrust/final-weave or portable paths"
+              exit 1
+            else
+              grep_status=$?
+              if [ "$grep_status" -ne 1 ]; then
+                echo "::error::repository reference check failed with status $grep_status"
+                exit "$grep_status"
+              fi
+            fi
+          done
+
+  documentation-integrity:
+    name: Documentation integrity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate documentation tree and local links
+        run: python3 scripts/check_docs.py

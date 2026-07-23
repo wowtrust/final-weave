@@ -1,0 +1,79 @@
+name: Engineering task
+description: Track documentation, refactoring, tests, CI, release, research, or repository maintenance.
+title: "[Task] "
+labels:
+  - task
+body:
+  - type: dropdown
+    id: task_type
+    attributes:
+      label: Task type
+      options:
+        - Documentation / tutorial
+        - Protocol specification / ADR
+        - Research / model checking
+        - Refactor
+        - Tests / vectors / fuzzing / chaos
+        - Performance / resource analysis
+        - Security hardening
+        - CI / build / release
+        - Dependency
+        - Repository governance
+        - Deployment / operations
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: background
+    attributes:
+      label: Background
+      description: Explain why this task is needed now and link prior decisions or evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: State what is in scope and out of scope.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Implementation plan
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk areas
+      description: Note safety, liveness, data availability, deterministic execution, finality, schema, compatibility, storage, recovery, resource, security, or operations risks.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      placeholder: |
+        - git diff --check
+        - python3 scripts/check_docs.py
+        - Relevant protocol, model, recovery, or performance checks
+    validations:
+      required: true
