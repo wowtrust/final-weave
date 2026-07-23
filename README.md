@@ -12,7 +12,7 @@
 FinalWeave 是一套面向多组织协作场景的许可型、多账本、确定性最终性 BlockDAG 区块链设计。它把并行数据可用性、直接 DAG 排序、确定性并行执行和可独立验证的最终性证明组合成一条完整链路。
 
 > [!IMPORTANT]
-> FinalWeave 当前处于**架构设计、协议规范与代码 Bootstrap 阶段**。仓库已经包含 Go module、`finalweave-node version` 诊断命令、构建信息和 v1 quorum 参数校验，但尚无可运行的共识节点、业务 CLI、SDK、API、容器镜像或正式版本，也没有 FinalWeave 自身的生产 TPS、延迟或稳定性数据。除明确标记为已实现的 Bootstrap 能力外，文档中的命令、目录和接口均属于目标设计，不能视为已经交付。
+> FinalWeave 当前处于**架构设计、协议规范与代码 Bootstrap 阶段**。仓库已经包含 Go module、`finalweave-node version` 诊断命令、构建信息、v1 quorum 参数校验，以及基于 zerolog 的同步结构化日志基础；日志包尚未被不存在的节点运行时或网络服务装配。项目仍无可运行的共识节点、业务 CLI、SDK、API、容器镜像或正式版本，也没有 FinalWeave 自身的生产 TPS、延迟或稳定性数据。除明确标记为已实现的 Bootstrap 能力外，文档中的命令、目录和接口均属于目标设计，不能视为已经交付。
 
 ## FinalWeave 解决什么问题
 
@@ -123,11 +123,11 @@ python3 scripts/check_docs.py
 python3 scripts/check_go_architecture.py
 ```
 
-当前二进制只提供可复用、可测试的版本诊断入口，不会启动网络、监听端口或运行共识。完整本地门禁还包括 `go vet ./...` 和 `go test -race ./...`。已配置 GitHub SSH key 的开发者也可以使用 `git@github.com:wowtrust/final-weave.git`。文档采用普通 Markdown 和内嵌 Mermaid，不需要专用站点生成器；两个校验脚本仅依赖 Python 3 标准库，其中代码架构检查会调用 Go 工具链。
+当前二进制只提供可复用、可测试的版本诊断入口，不会启动网络、监听端口或运行共识。`pkg/observability` 已提供严格校验、显式注入、同步写入的 JSON/console logger；它不启动 goroutine，也不代表节点运行时或日志持久化已经交付。完整本地门禁还包括 `go vet ./...` 和 `go test -race ./...`。已配置 GitHub SSH key 的开发者也可以使用 `git@github.com:wowtrust/final-weave.git`。文档采用普通 Markdown 和内嵌 Mermaid，不需要专用站点生成器；两个校验脚本仅依赖 Python 3 标准库，其中代码架构检查会调用 Go 工具链。
 
 ## 当前路线
 
-当前仓库交付阶段性设计与协议规范文档，以及一套最小 Go Bootstrap。Bootstrap 不是实施路线的阶段 0 完成声明；确定性模拟器、稳定错误模型、日志与指标、SBOM、跨实现向量等门禁仍需按独立 Issue 落地。后续实现按依赖关系推进：
+当前仓库交付阶段性设计与协议规范文档，以及一套最小 Go Bootstrap。Bootstrap 不是实施路线的阶段 0 完成声明；结构化日志工厂已经落地，但日志装配、强类型错误模型、metrics、确定性模拟器、SBOM、跨实现向量等门禁仍需按独立 Issue 落地。后续实现按依赖关系推进：
 
 ```text
 schema 与测试向量

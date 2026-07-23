@@ -1,6 +1,6 @@
 # FinalWeave 代码架构与 Bootstrap 基线
 
-> 状态：Bootstrap 已实现；共识节点、网络、存储、执行、证明和 SDK 尚未实现  
+> 状态：Bootstrap 与结构化日志基础已实现；共识节点、网络、存储、执行、证明和 SDK 尚未实现  
 > 权威目标结构：[实施路线](04-implementation-roadmap.md)  
 > 开发教程：[开发环境、目标代码架构与 Bootstrap](tutorial/03-development-environment-and-codebase.md)
 
@@ -8,12 +8,13 @@
 
 ## 1. 当前交付范围
 
-当前代码提供四项真实能力：
+当前代码提供五项真实能力：
 
 1. `github.com/wowtrust/final-weave` 单 Go module，最低 Go 版本为 1.26.5，CI 精确使用 1.26.5；
 2. `finalweave-node version` 文本/JSON 诊断输出；
 3. `internal/buildinfo` 的版本、提交、构建时间和 Go runtime 元数据；
-4. `pkg/types` 中严格的 v1 `n=3f+1`、`q=2f+1`、`k=f+1` 参数推导。
+4. `pkg/types` 中严格的 v1 `n=3f+1`、`q=2f+1`、`k=f+1` 参数推导；
+5. `pkg/observability` 中基于 zerolog 1.35.1 的同步结构化日志基础，提供严格 level/format 校验、JSON 与无颜色 console 输出、稳定 event/component 字段和进程内单调序号。
 
 裸执行 `finalweave-node` 会以非零状态明确拒绝启动，且不存在 `run`、`start` 或 `serve` 子命令；`--help` 和 `version` 是仅有的成功诊断路径。因此它不会打开存储、监听网络、产生签名、处理交易或声称 validator ready。此限制是防止 Bootstrap 被误当成共识实现的安全边界。
 
@@ -25,12 +26,13 @@
 | --- | --- | --- |
 | Go module | 单 module；`go.mod` 最低 1.26.5，CI 固定 1.26.5 | 本地更新工具链允许先验证，但合并结果以固定 CI 为准；暂不使用 `go.work` 或多 module |
 | CLI | Cobra 1.10.2 | `cmd` 只负责装配和退出；诊断命令不触发未来节点配置 |
+| 日志 | zerolog 1.35.1 | 默认契约是 JSON、同步写入和显式注入；console 仅供本地阅读；不使用全局 logger，不记录 payload、密钥、token、原始交易或 KMS/provider 错误细节 |
 | 核心包 | 优先标准库 | 没有真实消费者前不引入数据库、网络、日志或配置依赖 |
 | 测试 | unit、race、Fuzz target | Fuzz seed 会随普通测试执行；长时间 Fuzz 后续单独加门禁 |
 | CI | module verify/tidy、gofmt、vet、unit、race、架构检查、Linux 双架构构建 | 不创建空 integration、E2E、Chaos 或 benchmark job |
 | 依赖更新 | Dependabot security updates | routine Go 版本 PR 默认关闭，避免淹没安全修复 |
 
-Viper、zerolog、Prometheus、CBOR、gRPC、Pebble 等仍是后续真实适配器可评估的通用选型，不是当前依赖。FinalWeave 的本地配置、规范编码和严格签名验证比 TrustDB 具有额外 fail-closed 要求，必须在相应规范、负向语料和测试向量就绪后独立实现。
+zerolog 已作为第一个真实运维适配器落地；它复用 TrustDB 的结构化日志选型和显式注入方式，但首批不复制文件轮转、异步队列或丢弃策略。Viper、Prometheus、CBOR、gRPC、Pebble 等仍是后续真实适配器可评估的通用选型，不是当前依赖。FinalWeave 的本地配置、规范编码和严格签名验证比 TrustDB 具有额外 fail-closed 要求，必须在相应规范、负向语料和测试向量就绪后独立实现。
 
 ## 3. 当前目录与职责
 
@@ -39,6 +41,7 @@ cmd/finalweave-node/     薄进程入口；只装配诊断命令
 internal/buildinfo/      进程构建元数据，不进入协议身份或哈希
 internal/cli/            CLI 命令装配和输出格式
 pkg/types/               可复用的纯协议值与不变量
+pkg/observability/       可复用结构化日志适配器，不进入协议身份或哈希
 scripts/                 文档与 Go 依赖边界检查
 ```
 
@@ -50,6 +53,7 @@ scripts/                 文档与 Go 依赖边界检查
 flowchart TB
     CMD["cmd/finalweave-node"] --> CLI["internal/cli"]
     CLI --> BUILD["internal/buildinfo"]
+    OBS["pkg/observability<br/>zerolog adapter"]
     TYPES["pkg/types"]
 ```
 
@@ -73,6 +77,7 @@ flowchart TB
 - 每个 Ledger runtime 拥有一个根 context，每个 goroutine 有唯一 owner 和可等待退出路径；
 - channel、队列、缓存、分页、重试和并发度必须有硬上限及满载策略；
 - 共识、执行和证明核心不直接读取墙钟、环境变量、随机数、网络或全局 logger；
+- 日志由 composition root 创建并按值注入；组件只记录有界、经过允许的元数据，普通日志不承担协议证据或安全审计持久化语义；
 - network、storage、API 和 signer 都通过窄接口注入；
 - 恢复和交叉校验完成前不得开放 readiness 或外部 listener；
 - Safety WAL 在任何可能双签的签名之前严格持久化，恢复歧义必须 fail closed。
@@ -106,4 +111,4 @@ go build -trimpath -o ./bin/finalweave-node ./cmd/finalweave-node
 
 未来发布构建必须通过 `-ldflags -X` 注入 `internal/buildinfo` 的 version、commit 和 date；当前尚无发布流水线。无论是否注入，这些值都只用于诊断，不参与协议版本、对象身份或共识判断。
 
-这套 Bootstrap 只是可持续实现的起点，不代表[实施路线](04-implementation-roadmap.md)阶段 0 已完成。阶段 0 仍需要独立落地错误码、严格配置、日志脱敏、metrics、虚拟时钟、确定性网络模拟器、SBOM、依赖策略和相应 ADR。
+这套 Bootstrap 只是可持续实现的起点，不代表[实施路线](04-implementation-roadmap.md)阶段 0 已完成。日志工厂已经强制稳定 event 字段并明确敏感数据边界，但实际调用点仍需逐项以 allowlist 测试证明脱敏；阶段 0 还需要独立落地错误码、严格配置、metrics、虚拟时钟、确定性网络模拟器、SBOM、依赖策略和相应 ADR。
