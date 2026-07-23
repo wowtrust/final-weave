@@ -218,10 +218,31 @@ func TestConcurrentShutdownWaitsForOneServeExit(t *testing.T) {
 		t.Fatal("blocking request did not enter handler")
 	}
 
-	const shutdowns = 8
-	results := make(chan error, shutdowns)
+	initiatorContext, cancelInitiator := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelInitiator()
+	initiatorResult := make(chan error, 1)
+	go func() {
+		initiatorResult <- server.Shutdown(initiatorContext)
+	}()
+	waitForHTTPServerState(t, server, stateStopping)
+
+	shortContext, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelShort()
+	shortResult := make(chan error, 1)
+	go func() {
+		shortResult <- server.Shutdown(shortContext)
+	}()
+	<-shortContext.Done()
+	select {
+	case err := <-shortResult:
+		t.Fatalf("concurrent Shutdown() returned before shared drain: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	const waiters = 6
+	results := make(chan error, waiters)
 	var group sync.WaitGroup
-	for range shutdowns {
+	for range waiters {
 		group.Add(1)
 		go func() {
 			defer group.Done()
@@ -230,18 +251,14 @@ func TestConcurrentShutdownWaitsForOneServeExit(t *testing.T) {
 			results <- server.Shutdown(ctx)
 		}()
 	}
-	earlyReturned := false
-	var earlyErr error
-	select {
-	case earlyErr = <-results:
-		earlyReturned = true
-	case <-time.After(50 * time.Millisecond):
-	}
 	close(releaseRequest)
 	group.Wait()
 	close(results)
-	if earlyReturned {
-		t.Errorf("Shutdown() returned before active request drained: %v", earlyErr)
+	if err := <-initiatorResult; err != nil {
+		t.Errorf("initiating Shutdown() error = %v", err)
+	}
+	if err := <-shortResult; err != nil {
+		t.Errorf("short-deadline Shutdown() shared error = %v", err)
 	}
 	for err := range results {
 		if err != nil {
@@ -258,6 +275,86 @@ func TestConcurrentShutdownWaitsForOneServeExit(t *testing.T) {
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		t.Fatalf("repeated Shutdown() error = %v", err)
+	}
+}
+
+func TestConcurrentShutdownSharesForcedDeadlineResult(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newTestServer(t, DefaultConfig(), unavailableTracker())
+	requestEntered := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	server.app.Get("/block", func(ctx fiber.Ctx) error {
+		close(requestEntered)
+		<-releaseRequest
+		return ctx.SendStatus(fiber.StatusNoContent)
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	serveResult := make(chan error, 1)
+	go func() {
+		serveResult <- server.Serve(listener)
+	}()
+	waitForHTTP(t, listener.Addr().String()+livezPath)
+	requestResult := make(chan error, 1)
+	go func() {
+		response, requestErr := (&http.Client{Timeout: 2 * time.Second}).Get(
+			"http://" + listener.Addr().String() + "/block",
+		)
+		if requestErr == nil {
+			response.Body.Close()
+		}
+		requestResult <- requestErr
+	}()
+	select {
+	case <-requestEntered:
+	case <-time.After(time.Second):
+		t.Fatal("blocking request did not enter handler")
+	}
+
+	initiatorContext, cancelInitiator := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelInitiator()
+	initiatorResult := make(chan error, 1)
+	go func() {
+		initiatorResult <- server.Shutdown(initiatorContext)
+	}()
+	waitForHTTPServerState(t, server, stateStopping)
+
+	waiterContext, cancelWaiter := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelWaiter()
+	waiterResult := make(chan error, 1)
+	go func() {
+		waiterResult <- server.Shutdown(waiterContext)
+	}()
+	<-waiterContext.Done()
+	select {
+	case err := <-waiterResult:
+		t.Fatalf("concurrent Shutdown() returned its private deadline: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	initiatorErr := <-initiatorResult
+	if !errors.Is(initiatorErr, context.DeadlineExceeded) {
+		t.Fatalf("initiating Shutdown() error = %v, want DeadlineExceeded", initiatorErr)
+	}
+	waiterErr := <-waiterResult
+	if !errors.Is(waiterErr, context.DeadlineExceeded) {
+		t.Fatalf("concurrent Shutdown() error = %v, want shared DeadlineExceeded", waiterErr)
+	}
+	close(releaseRequest)
+	if err := <-requestResult; err != nil {
+		t.Fatalf("blocking request error = %v", err)
+	}
+	if err := <-serveResult; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+
+	repeatedContext, cancelRepeated := context.WithTimeout(context.Background(), time.Second)
+	defer cancelRepeated()
+	if err := server.Shutdown(repeatedContext); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("repeated Shutdown() error = %v, want shared DeadlineExceeded", err)
 	}
 }
 
@@ -306,6 +403,25 @@ func waitForHTTP(t *testing.T, addressAndPath string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("HTTP server did not become reachable at %s", addressAndPath)
+}
+
+func waitForHTTPServerState(t *testing.T, server *Server, want lifecycleState) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		server.mu.Lock()
+		state := server.state
+		server.mu.Unlock()
+		if state == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	server.mu.Lock()
+	state := server.state
+	server.mu.Unlock()
+	t.Fatalf("server lifecycle state = %d, want %d", state, want)
 }
 
 type gatedListener struct {
