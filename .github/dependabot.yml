@@ -1,12 +1,36 @@
 version: 2
 
 updates:
-  - package-ecosystem: github-actions
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
       day: monday
       time: "03:00"
+      timezone: Asia/Shanghai
+    # Routine version PRs stay disabled so security fixes remain focused.
+    # GitHub applies a separate limit to Dependabot security updates.
+    open-pull-requests-limit: 0
+    rebase-strategy: auto
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "fix(deps)"
+    allow:
+      - dependency-type: all
+    groups:
+      security-patches:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:15"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
     rebase-strategy: auto

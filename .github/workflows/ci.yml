@@ -114,3 +114,143 @@ jobs:
 
       - name: Validate documentation tree and local links
         run: python3 scripts/check_docs.py
+
+  go-quality:
+    name: Go quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            echo "::error::run gofmt on the listed files"
+            exit 1
+          fi
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify module dependencies
+        run: go mod verify
+
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Enforce Go architecture boundaries
+        run: python3 scripts/check_go_architecture.py
+
+  go-unit:
+    name: Go unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run unit tests
+        run: go test -count=1 -mod=readonly ./...
+
+  go-race:
+    name: Go race tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run race tests
+        run: go test -race -count=1 -mod=readonly ./...
+
+  go-build:
+    name: Go build (linux/${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Enforce architecture boundaries for target
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: python3 scripts/check_go_architecture.py
+
+      - name: Build finalweave-node
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o "${RUNNER_TEMP}/finalweave-node-${GOARCH}" ./cmd/finalweave-node
+
+  go-ci:
+    name: Go CI
+    if: always()
+    needs:
+      - go-quality
+      - go-unit
+      - go-race
+      - go-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every Go gate
+        shell: bash
+        env:
+          QUALITY_RESULT: ${{ needs['go-quality'].result }}
+          UNIT_RESULT: ${{ needs['go-unit'].result }}
+          RACE_RESULT: ${{ needs['go-race'].result }}
+          BUILD_RESULT: ${{ needs['go-build'].result }}
+        run: |
+          for result in "$QUALITY_RESULT" "$UNIT_RESULT" "$RACE_RESULT" "$BUILD_RESULT"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::one or more Go gates did not succeed"
+              exit 1
+            fi
+          done

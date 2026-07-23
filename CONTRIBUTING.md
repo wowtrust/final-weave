@@ -81,6 +81,8 @@ PR 描述必须：
 
 没有关联 Issue 的紧急修复必须解释原因，并在合并后补齐记录。
 
+由 GitHub Dependabot App 自动创建的依赖和安全更新 PR 不要求另建 Issue，也不要求人工改写其生成的分支名或正文；Dependabot alert、advisory 和生成的变更记录承担追踪作用。这类 PR 仍必须通过全部 required checks、依赖审查和项目规定的审批/合并规则，人工追加的非依赖改动必须另开 Issue 和 PR。
+
 ### 提交格式
 
 ```text
@@ -118,12 +120,19 @@ git config commit.template .github/commit_message_template.txt
 
 ### 验证门
 
-当前仓库处于规范阶段，所有改动至少运行：
+当前仓库处于规范与代码 Bootstrap 阶段，所有改动至少运行：
 
 ```bash
 git diff --check
 python3 scripts/check_docs.py
+go mod verify
+go vet ./...
+go test -count=1 -mod=readonly ./...
+go test -race -count=1 -mod=readonly ./...
+python3 scripts/check_go_architecture.py
 ```
+
+修改 Go module 后还必须运行 `go mod tidy` 并确认 `go.mod`、`go.sum` 没有非预期差异。涉及尚未落地的协议、存储、网络、执行或证明能力时，应按对应风险增加 property、Fuzz、向量、模型、Byzantine、网络分区、崩溃恢复、Chaos 或性能门禁；当前 Bootstrap 不能替代这些检查。
 
 文档或 ADR 变更还必须检查：
 
@@ -180,6 +189,8 @@ The `dependabot/` namespace is reserved for the GitHub Dependabot App.
 - PR bodies link the issue, summarize impact, cover all relevant safety and compatibility boundaries, list validation, and describe risk and rollback.
 - Security vulnerabilities use the private process in [SECURITY.md](SECURITY.md), not public issues.
 
+Dependency and security-update PRs authored by the GitHub Dependabot App are exempt from a separate issue and from manually rewriting the generated branch or body. The alert, advisory, and generated update record provide traceability. These PRs still require every required check, dependency review, and normal approval/merge control; unrelated human-authored changes require their own issue and PR.
+
 ### Safety review
 
 Review every relevant change against quorum and epoch rules, BatchAC meaning, deterministic ordering, serial-equivalent execution, exact finality-proof binding, canonical encoding, durable recovery, bounded Byzantine work, compatibility, and rollback.
@@ -188,11 +199,16 @@ No optimization may trade away safety, determinism, verifiability, or recoverabi
 
 ### Validation
 
-The current specification repository requires at least:
+The repository is now in the specification and code-bootstrap phase. Every change requires at least:
 
 ```bash
 git diff --check
 python3 scripts/check_docs.py
+go mod verify
+go vet ./...
+go test -count=1 -mod=readonly ./...
+go test -race -count=1 -mod=readonly ./...
+python3 scripts/check_go_architecture.py
 ```
 
-As implementation code lands, each PR must add and run the applicable unit, race, property, fuzz, cross-implementation vector, model, Byzantine, partition, crash-recovery, snapshot, chaos, and performance gates. Document every skipped relevant check and its residual risk.
+After changing module dependencies, run `go mod tidy` and review every `go.mod` and `go.sum` change. Each PR must add and run the applicable property, fuzz, cross-implementation vector, model, Byzantine, partition, crash-recovery, snapshot, chaos, and performance gates as implementation code lands. Document every skipped relevant check and its residual risk; the bootstrap gates do not replace feature-specific validation.
